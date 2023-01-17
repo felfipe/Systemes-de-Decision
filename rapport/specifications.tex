@@ -1,0 +1,217 @@
+\documentclass[12pt, a4paper, english, version=last, parskip=half, titlepage]{scrartcl}
+
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage[babel, final]{microtype}
+\usepackage{amssymb}
+\usepackage{unicode-math}
+\usepackage{mathtools}
+\usepackage{babel}
+\usepackage{physics}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[normalem]{ulem}
+\usepackage{subcaption}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[inline]{enumitem}
+
+% REMOVE
+\usepackage[export]{adjustbox}
+
+\makeatletter
+\def\fps@figure{hptb}
+\makeatother
+
+\setmainfont{TeX Gyre Pagella}
+\setsansfont{TeX Gyre Heros}
+\setmathfont{TeX Gyre Pagella Math}
+\setmathfont[range=\setminus]{Asana Math}
+
+\usepackage[newfloat]{minted}
+\setminted{autogobble,
+           fontsize=\footnotesize,
+           linenos,
+           breaklines,
+           xleftmargin=.7cm}
+
+\usepackage[bookmarks,
+            % hidelinks,
+            breaklinks,
+            pdfusetitle,
+            pdfencoding=unicode]{hyperref}
+
+% Enable \cref{...} and \Cref{...} instead of \ref
+\usepackage[nameinlink, capitalize, noabbrev]{cleveref}
+
+% \newcommand{\p}[1]{#1}
+% \newcommand{\p}[1]{\mathsf{#1}}
+% \newcommand{\p}[1]{\mathfrak{#1}}
+
+\newcommand{\matlab}{\mintinline{matlab}}
+\Crefname{listing}{Listing}{Listing}
+
+\title{Systèmes de Décision \texorpdfstring{\\}{---} Projet}
+\subtitle{Groupe 21}
+\author{José Lucas DE MELO COSTA \and
+Fernando KURIKE MATSUMOTO \and
+Victor Felipe DOMINGUES DO AMARAL}
+\date{Mention Intelligence Artificielle \\2021-2022}
+\publishers{Université Paris-Saclay\\CentraleSupélec}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\section{Modélisation}
+
+\subsection{Entrées}
+
+On peut définir $N_m$ le nombre de personnes (membres) à travailler, $N_c$ le nombre de compétences possibles, $N_p$ le nombre de projets, $N_j$ le délai maximal des projets.
+
+L'attribution des compétences est modélisée comme $HasComp \in \mathbb{B}^{N_m\times N_p}$
+\begin{equation*}
+    \text{HasComp}_{i,j} = 
+    \begin{cases}
+        1, & \text{si la personne $i$ a la compétence $k$} \\
+        0, & \text{sinon}
+    \end{cases}
+\end{equation*}
+
+Les congés sont modélisés aussi comme une matrice $Conge \in \mathbb{B}^{N_m \times N_j}$
+\begin{equation*}
+    \text{Conge}_{i,\ell} = 
+    \begin{cases}
+        1, & \text{si la personne $i$ prends congé au jour $\ell$} \\
+        0, & \text{sinon}
+    \end{cases}
+\end{equation*}
+
+La nécessité des projets est modélisée comme $\text{NeedComp} \in \mathbb{N}^{N_p \times N_c}$, avec $\text{NeedComp}_{j,k} =  c_i$, où $c_i \in \{0, \dots, N_c\}$ est le nombre de compétences du type $k$ dont le projet $j$ a besoin.
+
+Le revenu d'un projet $j$, $\text{Rev}_j \in \mathbb{R}$, est le total reçu par la réalisation de ce projet.
+
+La pénalité d'un projet $\text{Pénalité}_j \in \mathbb{R}$ est le coût par jour de retard d'un projet j.
+
+La deadline d'un projet j, $Deadline_j \in Z^{+}$ est le nombre de jours accordé pour réaliser ce projet.
+
+
+\subsection{Variables de décision}
+
+Compte tenu de la modélisation du problème, nous savons que l'allocation de ressources se fera sur quatre variables : 1) la personne, 2) le projet, 3) le jour et 4) la compétence exercée. Ainsi, on utilise une variable d'optimisation binaire et de dimension égale à quatre :
+\begin{equation*}
+    \text{Travail}_{i,j,k,\ell} = 
+    \begin{cases}
+        1, & \text{si la personne $i$ travaille dans le projet $j$,} \\[-0.1em]
+           & \text{avec la compétence $k$ au jour $\ell$} \\[0.2em]
+        0, & \text{sinon}
+    \end{cases}
+\end{equation*}
+
+avec $i \in \{1, \dots, N_m\}$, $j \in \{1, \dots N_p\}$, $k \in \{1, \dots, N_c\}$ et $\ell \in \{1, \dots, N_j\}$.
+
+Nous définissons aussi des variables auxiliaires :
+
+\begin{itemize}
+    \item Une variable binaire $\text{ATravail} \in \mathbb{B}^{N_p \times N_j}$ qui indique s'il y a de travail sur le projet dans chaque jour.
+    \item Une variable binaire de dimension $j$ qui indique si un projet est réalisé :
+        \begin{equation*}
+            \text{Realise}_{j} = 
+            \begin{cases}
+                1, & \text{si le projet $j$ est réalisé} \\
+                0, & \text{sinon}
+            \end{cases}
+        \end{equation*}
+    \item Des variables de dimension $j$ qui indiquent les jours de début et de fin d'un projet~: $\text{Début},\text{Fin} \in \mathbb{N}^{N_p}$.
+    \item Une variable qui indique la durée du projet le plus long : $\text{DuréeMax}_{j}$.
+    \item Une variable binaire $\text{AffectéProj} \in \mathbb{B}^{N_m \times N_p}$ qui indique si une personne a travaillée sur un projet.
+\end{itemize}
+
+\subsubsection{Variables intermédiaires}
+\par La variable $\text{retard}_j$ indique le nombre de jours que le projet $j$ est en retard. Elle est définie comme :
+
+\begin{equation*}
+\text{Retard}_j = \text{Fin}_j - \text{Deadline}_j
+\end{equation*}
+
+\subsection{Contraintes}
+
+\paragraph{Contrainte de qualification}
+Une personne ne peut exercer une compétence que si elle a cette compétence :
+\begin{equation*}
+    \forall i, j, k, \ell \quad \text{Travail}_{i, j, k, \ell} \leq \text{HasComp}_{i, k}
+\end{equation*}
+
+\paragraph{Contrainte d’unicité de l’affectation}
+Chaque jour, chaque personne est attribué à un seul projet au maximum en ne réalisant qu'une compétence :
+
+\begin{equation*}
+    \forall i, \ell \quad \sum_{j=1}^{\mathclap{N_{\text{proj}}}} \hspace{1ex} \sum_{k=1}^{\mathclap{N_{\text{comp}}}} \text{Travail}_{i, j, k, \ell} \leq 1
+\end{equation*}
+
+\paragraph{Contrainte de congé}
+Une personne ne peut pas travailler pendant ses jours de congé~:
+
+\begin{equation*}
+    \forall i, j, k, \ell \quad \text{Travail}_{i,j,k,\ell} \le 1 - \text{Conge}_{i,\ell}
+\end{equation*}
+
+% \paragraph{Contrainte de jours consécutifs}
+
+% \begin{equation*}
+%     \forall j, \forall \ell \ne (1, N_j) \quad
+%     \sum_{i=1}^{N_m} \sum_{k=1}^{N_c} \qty(\text{Travail}_{i,j,k,\ell-1} + \text{Travail}_{i,j,k,\ell+1}) \leq 1 + \sum_{i=1}^{N_m} \sum_{k=1}^{N_c} \text{Travail}_{i,j,k,\ell}
+% \end{equation*}
+
+\paragraph{Contraintes d’unicité de la réalisation d’un projet et de couverture des qualifications}
+Pour qu'un projet soit considéré comme réalise, tous les jours de travail de chaque compétence doivent été couverts par des membres du personnel. De plus, un projet ne peut être réalisé qu'une seule fois :
+
+\begin{equation*}
+    \forall j,k \sum_{i=1}^{N_m} \sum_{\ell=1}^{N_j} \text{Travail}_{i,j,k,\ell} = \text{Realise}_{j}\cdot\text{NeedComp}_{j,k}
+\end{equation*}
+
+\paragraph{Contraintes sur la variable ATravail}
+\begin{equation*}
+    \forall i,j,k,\ell \quad \text{ATravail}_{j,\ell} \ge \text{Travail}_{i,j,k,\ell}
+\end{equation*}
+
+\paragraph{Contraintes sur la variable AffectéProj}
+\begin{equation*}
+    \forall i,j,k,\ell \quad \text{AffectéProj}_{i,j} \ge \text{Travail}_{i,j,k,\ell}
+\end{equation*}
+
+\paragraph{Contraintes sur la durée d'un projet}
+Assure que les variables auxiliaires Début, Fin et DuréeMax soit bonnes.
+Si un projet $j$ n'est pas réalisé, on a $\text{Début}_j = N_j$ %et $\text{Fin}_j = N_j$.
+
+\begin{alignat*}{2}
+    \forall j,\ell \quad&& \text{Début}_j  &\le \ell \cdot \text{ATravail}_{j,\ell} + N_j \cdot (1-\text{ATravail}_{j,\ell}) \\
+    \forall j,\ell \quad&& \text{Fin}_j    &\ge \ell \cdot \text{ATravail}_{j,\ell} \\
+    \forall j      \quad&& \text{DuréeMax} &\ge \text{Fin}_j - \text{Début}_j + 1
+\end{alignat*}
+
+
+\subsection{Fonction objectif}
+
+\paragraph{Maximisation du résultat financier}
+Une fonction qui compose le total reçu de chaque projet moins les pénalités (retards de chaque projet).
+
+\begin{equation*}
+    f_1(x) = - (\text{Rev}^{\intercal}\text{Realise} - \text{Retard}^{\intercal}\text{Penalité})
+\end{equation*}
+
+où $x = (\text{Travail}, \text{ATravail}, \text{Realise}, \text{Debut}, \text{Fin}, \text{DuréeMax})$.
+
+\paragraph{Minimisation de la charge des collaborateurs} On souhaite que les collaborateurs n’aient pas à changer trop souvent de projet et, pour ce faire on s’attachera à minimiser le nombre de projets sur lesquels un quelconque collaborateur est affecté.
+
+\begin{equation*}
+    f_2(x) = \sum_{i=1}^{N_m} \sum_{j=1}^{N_p} \text{AffectéProj}_{i,j}
+\end{equation*}
+
+\paragraph{Minimisation d'exécution du projet le plus long} Il est important que les projets soient réalisés dans un nombre limités de jours consécutifs, ainsi on cherchera pour cela à exécuter le projet le plus long en un minimum de jours. 
+
+\begin{equation*}
+    f_3(x) = \text{DuréeMax}
+\end{equation*}
+
+\end{document}
