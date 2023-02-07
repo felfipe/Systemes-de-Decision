@@ -139,6 +139,57 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
 
     return m, d
 
+def get_non_dominated(m: Model, data: ModelData):
+    solutions = []
+    m.params.outputflag = 0
+    m.NumScenarios = (data.Nj+1)*(data.Nm*data.Np + 1)
+
+    c1 = m.addConstr(data.f2 == 0)
+    c2 = m.addConstr(data.f3 == 0)
+
+    for i in range(data.Nj+1):
+        for j in range(data.Nm*data.Np+1):
+            m.params.ScenarioNumber = i*(data.Nm*data.Np+1) + j
+            m.ScenNName = 'i = {}, j = {}'.format(i, j)
+            c1.ScenNRhs = j
+            c2.ScenNRhs = i
+
+    print("Starting optimzation...")
+
+    m.setObjective(data.f1)
+    m.reset()
+    m.optimize()
+
+    print("done.")
+
+    for s in range(m.NumScenarios):
+        m.params.ScenarioNumber = s
+        solutions.append([m.ScenNObjVal, data.Af.ScenNX.sum(), data.Dm.ScenNX])
+
+    m.remove(c1)
+    m.remove(c2)
+
+    solutions = np.array(solutions)
+    solutions = solutions.round().astype(int)
+
+    filtered_solutions = []
+    scenario = []
+
+    for i in range(solutions.shape[0]):
+        non_dominated = True
+        for j in range(solutions.shape[0]):
+            if i == j:
+                continue
+            if dominate(solutions[j], solutions[i]):
+                non_dominated = False        
+                break
+        if non_dominated:
+            scenario.append(i)
+            filtered_solutions.append(solutions[i])
+
+    return filtered_solutions, scenario 
+        
+
 def set_color(val: str, data: ModelData):
     colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink']
     if '_' not in val: return 
