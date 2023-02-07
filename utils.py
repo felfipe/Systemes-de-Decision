@@ -1,5 +1,6 @@
 import json
-from typing import Union, List, TypedDict
+from typing import Union, List
+import dataclasses
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import matplotlib
@@ -14,10 +15,15 @@ from gurobipy import Model, GRB, Var, MVar, MLinExpr
 
 @dataclass
 class Solution:
-    qualifications: np.ndarray  # liste de compétences distinctes
-    staff: np.ndarray  # liste des noms des membres
-    vacations: np.ndarray  # jours des congé par membre (dans le même ordre que staff)
-    projects: np.ndarray  # liste des noms des projets
+    Nm: int  # nombre de membres
+    Nc: int  # nombre de compétences
+    Np: int  # nombre de projets
+    Nj: int  # délai maximal des projets
+
+    qualifications: List[str]  # liste de compétences distinctes
+    staff: List[str]  # liste des noms des membres
+    vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
+    projects: List[str]  # liste des noms des projets
 
     T: np.ndarray  # variable de décision principale, shape (Nm, Np, Nc, Nj)
     R: np.ndarray  # indique si un projet est réalisé, shape (Np,)
@@ -161,23 +167,10 @@ class Instance:
         self.model.setObjective(self.f1, GRB.MINIMIZE)
 
     def get_current_solution(self) -> Solution:
-        return Solution(
-            qualifications=self.qualifications,
-            staff=self.staff,
-            vacations=self.vacations,
-            projects=self.projects,
-            T=self._get_value(self.T),
-            R=self._get_value(self.R),
-            De=self._get_value(self.De),
-            F=self._get_value(self.F),
-            Re=self._get_value(self.Re),
-            Dm=self._get_value(self.Dm),
-            Af=self._get_value(self.Af),
-            Mp=self._get_value(self.Mp),
-            f1=self.model.ScenNObjVal if self.is_multiscene else self.model.ObjVal,
-            f2=self._get_value(self.f2),
-            f3=self._get_value(self.f3),
-        )
+        kwargs = {}
+        for field in dataclasses.fields(Solution):
+            kwargs[field.name] = self._get_value(field.name)
+        return Solution(**kwargs)
 
     def get_solutions(self) -> List[Solution]:
         if not self.is_multiscene:
@@ -196,16 +189,21 @@ class Instance:
     def is_multiscene(self) -> bool:
         return self.model.NumScenarios > 0
 
-    def _get_value(self, var: Union[Var, MVar]):
-        if self.is_multiscene:
-            return var.ScenNX
+    def _get_value(self, field_name: str):
+        if field_name == "f1":
+            if self.is_multiscene:
+                return self.model.ScenNObjVal
+            else:
+                return self.model.ObjVal
+
+        val = getattr(self, field_name)
+        if isinstance(val, (Var, MVar)):
+            if self.is_multiscene:
+                return val.ScenNX
+            else:
+                return val.X
         else:
-            return var.X
-        
-        if isinstance(value, np.ndarray):
-            return value.tolist()
-        else:
-            return value
+            return val
 
 
 def plot_obj_values(solutions):
