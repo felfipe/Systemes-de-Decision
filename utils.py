@@ -162,17 +162,19 @@ def plot_solution(m : Model, data : ModelData):
     norm = matplotlib.colors.Normalize(vmin=0, vmax=data.Np+1, clip=True)
     mapper = cm.ScalarMappable(norm=norm, cmap=cm.Set1)
 
-    patches = [mpatches.Patch(color=color, label="project {}".format(i)) for i, color in enumerate(mapper.to_rgba(range(data.Np)))]
+    patches = [mpatches.Patch(color=mapper.to_rgba(i), label=proj) for i, proj in enumerate(data.projects)]
     ax.legend(handles=patches)
 
     for i, member in enumerate(data.staff):
         p_staff_list = []
         projects = []
-        for p in range(data.Np):   
-            for jour, worked in enumerate(data.T.X[i][p].sum(axis=0)):
-                if(worked >= 1):
-                    p_staff_list.append((jour, 1-xmargin))
-                    projects.append(p)
+        for p in range(data.Np):
+            for c in range(data.Nc):   
+                for jour, worked in enumerate(data.T.X[i][p][c]):
+                    if(worked == 1):
+                        p_staff_list.append((jour, 1-xmargin))
+                        projects.append(p)
+                        ax.annotate(data.qualifications[c], (jour +0.5, i+0.5))
 
         ax.broken_barh(p_staff_list, (i + ymargin, 1 - ymargin), facecolors=mapper.to_rgba(projects))
         ax.set_xlabel('Days')              
