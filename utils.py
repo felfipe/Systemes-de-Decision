@@ -12,6 +12,11 @@ from gurobipy import Model, GRB, Var, MVar, MLinExpr
 
 
 class Solution(TypedDict):
+    qualifications: List[str]  # liste de compétences distinctes
+    staff: List[str]  # liste des noms des membres
+    vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
+    projects: List[str]  # liste des noms des projets
+
     T: List[List[List[List[int]]]]  # variable de décision principale, shape (Nm, Np, Nc, Nj)
     R: List[int]  # indique si un projet est réalisé, shape (Np,)
     De: List[int]  # jour de début de chaque projet, shape (Np,)
@@ -24,15 +29,6 @@ class Solution(TypedDict):
     f1: int
     f2: int
     f3: int
-
-
-class ModelOutput(TypedDict):
-    qualifications: List[str]  # liste de compétences distinctes
-    staff: List[str]  # liste des noms des membres
-    vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
-    projects: List[str]  # liste des noms des projets
-
-    solutions: List[Solution]
 
 
 class Instance:
@@ -162,8 +158,12 @@ class Instance:
 
         self.model.setObjective(self.f1, GRB.MINIMIZE)
 
-    def get_current_solution(self) -> Solution:
+    def get_solution(self) -> Solution:
         return Solution(
+            qualifications=self.qualifications,
+            staff=self.staff,
+            vacations=self.vacations,
+            projects=self.projects,
             T=self._get_value(self.T),
             R=self._get_value(self.R),
             De=self._get_value(self.De),
@@ -177,24 +177,17 @@ class Instance:
             f3=self._get_value(self.f3),
         )
 
-    def get_output(self) -> ModelOutput:
-        if self.is_multiscene:
-            solutions = []
-            initial_value = self.model.params.ScenarioNumber
-            for i in range(self.model.NumScenarios):
-                self.model.params.ScenarioNumber = i
-                solutions.append(self.get_current_solution())
-            self.model.params.ScenarioNumber = initial_value
-        else:
-            solutions = [self.get_current_solution()]
+    def get_all_solutions(self) -> List[Solution]:
+        assert self.is_multiscene
 
-        return ModelOutput(
-            qualifications=self.qualifications,
-            staff=self.staff,
-            vacations=self.vacations,
-            projects=self.projects,
-            solutions=solutions,
-        )
+        solutions = []
+        initial_value = self.model.params.ScenarioNumber
+        for i in range(self.model.NumScenarios):
+            self.model.params.ScenarioNumber = i
+            solutions.append(self.get_solution())
+        self.model.params.ScenarioNumber = initial_value
+
+        return solutions
 
     @property
     def is_multiscene(self) -> bool:
