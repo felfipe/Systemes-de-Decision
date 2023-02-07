@@ -2,6 +2,7 @@ import json
 from typing import List, Tuple
 
 import numpy as np
+import pandas as pd
 
 from gurobipy import Model, GRB, Var, MVar, LinExpr, MLinExpr
 
@@ -11,6 +12,11 @@ class ModelData:
     Nc: int  # nombre de compétences
     Np: int  # nombre de projets
     Nj: int  # délai maximal des projets
+
+    nom_mapping: int # crée un mapping entre nom et index
+    travail_mapping: int # crée un mapping entre travail et index
+    qualifications_mapping: int # crée un mapping entre qualifications et index
+    jour_mapping: int # crée un mapping entre jour et index
 
     qualifications: List[str]  # liste de compétences distinctes
     staff: List[str]  # liste des noms des membres
@@ -38,10 +44,15 @@ class ModelData:
 def create_model(instance_path: str) -> Tuple[Model, ModelData]:
     with open(instance_path) as f:
         instance = json.load(f)
+    
 
     d = ModelData()
     d.qualifications = list(instance["qualifications"])
     d.staff = [person["name"] for person in instance["staff"]]
+    d.nom_mapping = {x: instance['staff'][x]['name'] for x in range(len(instance['staff']))}
+    d.travail_mapping = {x:instance['jobs'][x]['name'] for x in range(len(instance['jobs']))}
+    d.qualifications_mapping = {x:instance['qualifications'][x] for x in range(len(instance['qualifications']))}
+    d.jour_mapping = np.arange(instance['horizon'])+1
 
     # Tailles des données
     d.Nm = len(instance["staff"])
@@ -126,3 +137,48 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
     m.setObjective(d.f1, GRB.MINIMIZE)
 
     return m, d
+
+def set_color(val: str, data: ModelData):
+    colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink']
+    if '_' not in val: return 
+    val = val.split('_')[1]
+    switch = {
+        data.travail_mapping[proj]: f'background-color: {colors[proj]}'
+        for proj in range(data.Np)
+    }
+    return switch.get(val)
+
+def get_planning_from_solution(data: ModelData):
+    planning = np.empty((data.Nm, data.Np, data.Nc, data.Nj), dtype=np.int64)
+    for i in range(data.Nm):
+        for j in range(data.Np):
+            for k in range(data.Nc):
+                for l in range(data.Nj):
+                    planning[i][j][k][l] = data.T[i][j][k][l].X
+    return planning
+
+def color_mapping(data: ModelData):
+    df_colors = {
+        data.travail_mapping[proj]: ['x_'+data.travail_mapping[proj]]
+        for proj in range(data.Np)
+    }
+    df_colors = pd.DataFrame(df_colors)
+    df_colors = df_colors.style.applymap(set_color)
+    return df_colors
+                
+def create_planning(data: ModelData):
+    planning = data.T.ScenNX
+    df = {
+        day: [
+            data.qualifications_mapping[planning[member, :, :, day].sum(axis=0).argmax()]+"_"+data.travail_mapping[planning[member, :, :, day].sum(axis=1).argmax()]
+            if data.T.ScenNX[member][planning[member, :, :, day].sum(axis=1).argmax()][planning[member, :, :, day].sum(axis=0).argmax()][day] == 1
+            else 'X'
+            for member in range(data.Nm)
+        ] 
+        for day in range(data.Nj)
+    }
+    df['membre'] = data.nom_mapping.values()
+    df = pd.DataFrame(df)
+    df.set_index('membre', drop=True, inplace=True)
+    df = df.style.applymap(lambda x: set_color(x, data))
+    return df
