@@ -1,5 +1,5 @@
 import json
-from typing import List, Tuple
+from typing import Union, List, TypedDict
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.cm as cm
@@ -8,10 +8,36 @@ import numpy as np
 import plotly.express as px
 import pandas as pd
 
-from gurobipy import Model, GRB, Var, MVar, LinExpr, MLinExpr
+from gurobipy import Model, GRB, Var, MVar, MLinExpr
 
 
-class ModelData:
+class Solution(TypedDict):
+    T: List[List[List[List[int]]]]  # variable de décision principale, shape (Nm, Np, Nc, Nj)
+    R: List[int]  # indique si un projet est réalisé, shape (Np,)
+    De: List[int]  # jour de début de chaque projet, shape (Np,)
+    F: List[int]  # jour de fin de chaque projet, shape (Np,)
+    Re: List[int]  # rétard par projet, shape (Np,)
+    Dm: int  # durée maximale d'un projet
+    Af: List[List[int]]  # indique si une personne a travaillé sur un projet, shape (Nm, Np)
+    Mp: int  # indique le nombre maximum de projets par personne
+
+    f1: int
+    f2: int
+    f3: int
+
+
+class ModelOutput(TypedDict):
+    qualifications: List[str]  # liste de compétences distinctes
+    staff: List[str]  # liste des noms des membres
+    vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
+    projects: List[str]  # liste des noms des projets
+
+    solutions: List[Solution]
+
+
+class Instance:
+    model: Model
+
     Nm: int  # nombre de membres
     Nc: int  # nombre de compétences
     Np: int  # nombre de projets
@@ -42,103 +68,148 @@ class ModelData:
     f2: Var
     f3: Var
 
+    def __init__(self, instance_path: str) -> None:
+        with open(instance_path) as f:
+            instance = json.load(f)
 
-def create_model(instance_path: str) -> Tuple[Model, ModelData]:
-    with open(instance_path) as f:
-        instance = json.load(f)
+        self.qualifications = list(instance["qualifications"])
+        self.staff = [person["name"] for person in instance["staff"]]
+        self.vacations = [person["vacations"] for person in instance["staff"]]
+        self.projects = [job["name"] for job in instance["jobs"]]
 
-    d = ModelData()
-    d.qualifications = list(instance["qualifications"])
-    d.staff = [person["name"] for person in instance["staff"]]
-    d.vacations = [person["vacations"] for person in instance["staff"]]
-    d.projects = [job["name"] for job in instance["jobs"]]
+        # Tailles des données
+        self.Nm = len(instance["staff"])
+        self.Nc = len(self.qualifications)
+        self.Np = len(instance["jobs"])
+        self.Nj = instance["horizon"]
 
-    # Tailles des données
-    d.Nm = len(instance["staff"])
-    d.Nc = len(d.qualifications)
-    d.Np = len(instance["jobs"])
-    d.Nj = instance["horizon"]
+        # Création des matrices d'entrée
+        self.H = np.zeros((self.Nm, self.Nc), dtype=np.int32)
+        self.C = np.zeros((self.Nm, self.Nj), dtype=np.int32)
+        self.Q = np.zeros((self.Np, self.Nc), dtype=np.int32)
+        self.Rev = np.zeros(self.Np, dtype=np.int32)
+        self.P = np.zeros(self.Np, dtype=np.int32)
+        self.Dl = np.zeros(self.Np, dtype=np.int32)
 
-    # Création des matrices d'entrée
-    d.H = np.zeros((d.Nm, d.Nc), dtype=np.int32)
-    d.C = np.zeros((d.Nm, d.Nj), dtype=np.int32)
-    d.Q = np.zeros((d.Np, d.Nc), dtype=np.int32)
-    d.Rev = np.zeros(d.Np, dtype=np.int32)
-    d.P = np.zeros(d.Np, dtype=np.int32)
-    d.Dl = np.zeros(d.Np, dtype=np.int32)
+        for i, person in enumerate(instance["staff"]):
+            for qualif in person["qualifications"]:
+                k = self.qualifications.index(qualif)
+                self.H[i, k] = 1
+            for vacation in person["vacations"]:
+                self.C[i, vacation - 1] = 1
 
-    for i, person in enumerate(instance["staff"]):
-        for qualif in person["qualifications"]:
-            k = d.qualifications.index(qualif)
-            d.H[i, k] = 1
-        for vacation in person["vacations"]:
-            d.C[i, vacation - 1] = 1
+        for j, job in enumerate(instance["jobs"]):
+            for qualif, days in job["working_days_per_qualification"].items():
+                k = self.qualifications.index(qualif)
+                self.Q[j, k] = days
+            self.Rev[j] = job["gain"]
+            self.P[j] = job["daily_penalty"]
+            self.Dl[j] = job["due_date"]
 
-    for j, job in enumerate(instance["jobs"]):
-        for qualif, days in job["working_days_per_qualification"].items():
-            k = d.qualifications.index(qualif)
-            d.Q[j, k] = days
-        d.Rev[j] = job["gain"]
-        d.P[j] = job["daily_penalty"]
-        d.Dl[j] = job["due_date"]
+        # Création du modèle Gurobi
+        self.model = Model("CompuOpti")
 
-    # Création du modèle Gurobi
-    m = Model("CompuOpti")
+        # Variables de decision
+        self.T = self.model.addMVar((self.Nm, self.Np, self.Nc, self.Nj), vtype=GRB.BINARY, name="T")
+        self.R = self.model.addMVar(self.Np, vtype=GRB.BINARY, name="R")
+        self.De = self.model.addMVar(self.Np, lb=1, ub=self.Nj, vtype=GRB.INTEGER, name="De")
+        self.F = self.model.addMVar(self.Np, lb=1, ub=self.Nj, vtype=GRB.INTEGER, name="F")
+        self.Re = self.model.addMVar(self.Np, lb=0, ub=self.Nj-1, vtype=GRB.INTEGER, name="Re")
+        self.Dm = self.model.addVar(lb=0, ub=self.Nj, vtype=GRB.INTEGER, name="Dm")
+        self.Af = self.model.addMVar((self.Nm, self.Np), vtype=GRB.BINARY, name="Af")
+        self.Mp = self.model.addVar(lb=0, ub=self.Np, vtype=GRB.INTEGER, name="Mp")
 
-    # Variables de decision
-    d.T = m.addMVar((d.Nm, d.Np, d.Nc, d.Nj), vtype=GRB.BINARY, name="T")
-    d.R = m.addMVar(d.Np, vtype=GRB.BINARY, name="R")
-    d.De = m.addMVar(d.Np, lb=1, ub=d.Nj, vtype=GRB.INTEGER, name="De")
-    d.F = m.addMVar(d.Np, lb=1, ub=d.Nj, vtype=GRB.INTEGER, name="F")
-    d.Re = m.addMVar(d.Np, lb=0, ub=d.Nj-1, vtype=GRB.INTEGER, name="Re")
-    d.Dm = m.addVar(lb=0, ub=d.Nj, vtype=GRB.INTEGER, name="Dm")
-    d.Af = m.addMVar((d.Nm, d.Np), vtype=GRB.BINARY, name="Af")
-    d.Mp = m.addVar(lb=0, ub=d.Np, vtype=GRB.INTEGER, name="Mp")
+        # Contrainte de qualification
+        for j in range(self.Np):
+            for ell in range(self.Nj):
+                self.model.addConstr(self.T[:, j, :, ell] <= self.H)
 
-    # Contrainte de qualification
-    for j in range(d.Np):
-        for ell in range(d.Nj):
-            m.addConstr(d.T[:, j, :, ell] <= d.H)
+        # Contrainte d’unicité de l’affectation
+        for i in range(self.Nm):
+            for ell in range(self.Nj):
+                self.model.addConstr(self.T[i, :, :, ell].sum() <= 1)
 
-    # Contrainte d’unicité de l’affectation
-    for i in range(d.Nm):
-        for ell in range(d.Nj):
-            m.addConstr(d.T[i, :, :, ell].sum() <= 1)
+        # Contrainte de congé
+        for j in range(self.Np):
+            for k in range(self.Nc):
+                self.model.addConstr(self.T[:, j, k, :] <= 1 - self.C)
 
-    # Contrainte de congé
-    for j in range(d.Np):
-        for k in range(d.Nc):
-            m.addConstr(d.T[:, j, k, :] <= 1 - d.C)
+        # Contraintes d’unicité de la réalisation d’un projet et de couverture des qualifications
+        for j in range(self.Np):
+            for k in range(self.Nc):
+                self.model.addConstr(self.T[:, j, k, :].sum() == self.R[j] * self.Q[j, k])
 
-    # Contraintes d’unicité de la réalisation d’un projet et de couverture des qualifications
-    for j in range(d.Np):
-        for k in range(d.Nc):
-            m.addConstr(d.T[:, j, k, :].sum() == d.R[j] * d.Q[j, k])
+        # Contraintes sur les variables d'affectation (Af et Mp)
+        for k in range(self.Nc):
+            for ell in range(self.Nj):
+                self.model.addConstr(self.Af >= self.T[:, :, k, ell])
+        for i in range(self.Nm):
+            self.model.addConstr(self.Mp >= self.Af[i, :].sum())
 
-    # Contraintes sur les variables d'affectation (Af et Mp)
-    for k in range(d.Nc):
-        for ell in range(d.Nj):
-            m.addConstr(d.Af >= d.T[:, :, k, ell])
-    for i in range(d.Nm):
-        m.addConstr(d.Mp >= d.Af[i, :].sum())
+        # Contraintes sur la durée d’un projet
+        for i in range(self.Nm):
+            for k in range(self.Nc):
+                for ell in range(self.Nj):
+                    self.model.addConstr(self.De <= (ell + 1) * self.T[i, :, k, ell] + self.Nj * (1 - self.T[i, :, k, ell]))
+                    self.model.addConstr(self.F >= (ell + 1) * self.T[i, :, k, ell])
+        self.model.addConstr(self.Re >= self.F - self.Dl)
+        self.model.addConstr(self.Dm >= self.F - self.De + self.R)
 
-    # Contraintes sur la durée d’un projet
-    for i in range(d.Nm):
-        for k in range(d.Nc):
-            for ell in range(d.Nj):
-                m.addConstr(d.De <= (ell + 1) * d.T[i, :, k, ell] + d.Nj * (1 - d.T[i, :, k, ell]))
-                m.addConstr(d.F >= (ell + 1) * d.T[i, :, k, ell])
-    m.addConstr(d.Re >= d.F - d.Dl)
-    m.addConstr(d.Dm >= d.F - d.De + d.R)
+        # Fonctions objectifs
+        self.f1 = -(self.Rev.T @ self.R - self.P.T @ self.Re)
+        self.f2 = self.Mp
+        self.f3 = self.Dm
 
-    # Fonctions objectifs
-    d.f1 = -(d.Rev.T @ d.R - d.P.T @ d.Re)
-    d.f2 = d.Mp
-    d.f3 = d.Dm
+        self.model.setObjective(self.f1, GRB.MINIMIZE)
 
-    m.setObjective(d.f1, GRB.MINIMIZE)
+    def get_current_solution(self) -> Solution:
+        return Solution(
+            T=self._get_value(self.T),
+            R=self._get_value(self.R),
+            De=self._get_value(self.De),
+            F=self._get_value(self.F),
+            Re=self._get_value(self.Re),
+            Dm=self._get_value(self.Dm),
+            Af=self._get_value(self.Af),
+            Mp=self._get_value(self.Mp),
+            f1=self.model.ScenNObjVal if self.is_multiscene else self.model.ObjVal,
+            f2=self._get_value(self.f2),
+            f3=self._get_value(self.f3),
+        )
 
-    return m, d
+    def get_output(self) -> ModelOutput:
+        if self.is_multiscene:
+            solutions = []
+            initial_value = self.model.params.ScenarioNumber
+            for i in range(self.model.NumScenarios):
+                self.model.params.ScenarioNumber = i
+                solutions.append(self.get_current_solution())
+            self.model.params.ScenarioNumber = initial_value
+        else:
+            solutions = [self.get_current_solution()]
+
+        return ModelOutput(
+            qualifications=self.qualifications,
+            staff=self.staff,
+            vacations=self.vacations,
+            projects=self.projects,
+            solutions=solutions,
+        )
+
+    @property
+    def is_multiscene(self) -> bool:
+        return self.model.NumScenarios > 0
+
+    def _get_value(self, var: Union[Var, MVar]):
+        if self.is_multiscene:
+            value = var.ScenNX
+        else:
+            value = var.X
+        
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        else:
+            return value
 
 
 def plot_obj_values(solutions):
