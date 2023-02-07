@@ -1,7 +1,12 @@
 import json
 from typing import List, Tuple
-
+import matplotlib.pyplot as plt
+import matplotlib
+import matplotlib.cm as cm
+import matplotlib.patches as mpatches
 import numpy as np
+import plotly.express as px
+import pandas as pd
 
 from gurobipy import Model, GRB, Var, MVar, LinExpr, MLinExpr
 
@@ -130,3 +135,43 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
     m.setObjective(d.f1, GRB.MINIMIZE)
 
     return m, d
+
+
+
+def plot_obj_values(solutions):
+    data_plot = pd.DataFrame(solutions)
+    fig = px.scatter_3d(x=data_plot[0], y=data_plot[1], z=data_plot[2])
+    fig.show()
+
+
+def plot_solution(m : Model, data : ModelData):
+    fig, ax = plt.subplots()
+    fig.set_size_inches(16, 9)
+    ax.set_yticks([i+0.5 for i in range(len(data.staff))], labels=data.staff)
+    # Horizontal bar plot with gaps
+    ymargin = 0.1
+    xmargin = 0.01
+
+    final_xmargin = data.Nj / 3
+    ax.set_ylim(-0.5, data.Nm+ymargin)
+    ax.set_xlim(-0.5, data.Nj+final_xmargin)
+
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=data.Np+1, clip=True)
+    mapper = cm.ScalarMappable(norm=norm, cmap=cm.Set1)
+
+    patches = [mpatches.Patch(color=color, label="project {}".format(i)) for i, color in enumerate(mapper.to_rgba(range(data.Np)))]
+    ax.legend(handles=patches)
+
+    for i, member in enumerate(data.staff):
+        p_staff_list = []
+        projects = []
+        for p in range(data.Np):   
+            for jour, worked in enumerate(data.T.X[i][p].sum(axis=0)):
+                if(worked >= 1):
+                    p_staff_list.append((jour, 1-xmargin))
+                    projects.append(p)
+
+        ax.broken_barh(p_staff_list, (i + ymargin, 1 - ymargin), facecolors=mapper.to_rgba(projects))
+        ax.set_xlabel('Days')              
+        
+    plt.show()
