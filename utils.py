@@ -1,5 +1,5 @@
 import json
-from typing import Union, List
+from typing import Union, List, Generator
 import dataclasses
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
@@ -219,42 +219,82 @@ class Instance:
         return val
 
 
+
+def filter_solutions(solutions : List[Solution]) -> List[Solution]:
+    filtered_solutions = []
+
+    def dominate(s1 : Solution, s2 : Solution):
+        obj1 = np.array([s1.f1, s1.f2, s1.f3])
+        obj2 = np.array([s2.f1, s2.f2, s2.f3])
+        temp = obj1 - obj2
+        
+        if max(temp) > 0 or min(temp) == 0:
+            return False
+        
+        return True
+
+    for i, si in enumerate(solutions):
+        non_dominated = True
+        for j, sj in enumerate(solutions):
+            if i == j:
+                continue
+            if dominate(sj, si):
+                non_dominated = False    
+                break
+        if non_dominated:
+            filtered_solutions.append(si)
+
+    return filtered_solutions
+
 def plot_obj_values(solutions):
-    data_plot = pd.DataFrame(solutions)
-    fig = px.scatter_3d(x=data_plot[0], y=data_plot[1], z=data_plot[2])
+    obj_f1 = [s.f1 for s in solutions]
+    obj_f2 = [s.f2 for s in solutions]
+    obj_f3 = [s.f3 for s in solutions]
+
+
+    
+    fig = px.scatter_3d(x=obj_f1, y=obj_f2, z=obj_f3)
     fig.show()
 
 
-def plot_solution(m : Model, data : ModelData):
+def plot_solution(solution : Solution):
     fig, ax = plt.subplots()
     fig.set_size_inches(16, 9)
-    ax.set_yticks([i+0.5 for i in range(len(data.staff))], labels=data.staff)
+    ax.set_yticks([i+0.5 for i in range(len(solution.staff))], labels=solution.staff)
     # Horizontal bar plot with gaps
     ymargin = 0.1
     xmargin = 0.01
 
-    final_xmargin = data.Nj / 3
-    ax.set_ylim(-0.5, data.Nm+ymargin)
-    ax.set_xlim(-0.5, data.Nj+final_xmargin)
+    final_xmargin = solution.Nj / 3
+    ax.set_ylim(-0.5, solution.Nm+ymargin)
+    ax.set_xlim(-0.5, solution.Nj+final_xmargin)
 
-    norm = matplotlib.colors.Normalize(vmin=0, vmax=data.Np+1, clip=True)
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=solution.Np+1, clip=True)
     mapper = cm.ScalarMappable(norm=norm, cmap=cm.Set1)
 
-    patches = [mpatches.Patch(color=mapper.to_rgba(i), label=proj) for i, proj in enumerate(data.projects)]
+    patches = [mpatches.Patch(color=mapper.to_rgba(i), label=proj) for i, proj in enumerate(solution.projects)]
     ax.legend(handles=patches)
 
-    for i, member in enumerate(data.staff):
+    for i in range(solution.Nm):
         p_staff_list = []
         projects = []
-        for p in range(data.Np):
-            for c in range(data.Nc):   
-                for jour, worked in enumerate(data.T.X[i][p][c]):
+
+        # plot planning
+        for p in range(solution.Np):
+            for c in range(solution.Nc):   
+                for jour, worked in enumerate(solution.T[i][p][c]):
                     if(worked == 1):
                         p_staff_list.append((jour, 1-xmargin))
                         projects.append(p)
-                        ax.annotate(data.qualifications[c], (jour +0.5, i+0.5))
+                        ax.annotate(solution.qualifications[c], (jour +0.5, i+0.5))
 
         ax.broken_barh(p_staff_list, (i + ymargin, 1 - ymargin), facecolors=mapper.to_rgba(projects))
         ax.set_xlabel('Days')              
         
+        # plot vacations
+        for p in range(solution.Nm):
+            for j in solution.vacations[p]:
+                ax.annotate("Congé", (j-1 + 0.4, p+0.5))
+
+            
     plt.show()
