@@ -1,5 +1,6 @@
 import json
-from typing import Union, List, Generator
+import gzip
+from typing import Iterable, TextIO, List, Generator
 import dataclasses
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
@@ -37,6 +38,26 @@ class Solution:
     f1: int
     f2: int
     f3: int
+
+    @staticmethod
+    def from_python_dict(d: dict) -> "Solution":
+        kwargs = {}
+        for field in dataclasses.fields(Solution):
+            if field.type == np.ndarray:
+                kwargs[field.name] = np.asarray(d[field.name])
+            else:
+                kwargs[field.name] = d[field.name]
+
+        return Solution(**kwargs)
+
+
+class SolutionEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Solution):
+            return obj.__dict__
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 class Instance:
@@ -218,6 +239,37 @@ class Instance:
 
         return val
 
+
+def _open_output(path: str, mode: str) -> TextIO:
+    if path.lower().endswith(".json.gz"):
+        return gzip.open(path, mode=mode + "t", encoding="utf-8")  # type: ignore
+    elif path.lower().endswith(".json"):
+        return open(path, mode=mode)  # type: ignore
+
+    ext = path.split('.')[-1]
+    raise ValueError(f"Unsupported file format: {ext}. Expected .json or .json.gz")
+
+
+def save_output(out: Iterable[Solution], path: str):
+    it = iter(out)
+    with _open_output(path, "w") as f:
+        f.write("[")
+        json.dump(next(it), f, cls=SolutionEncoder)
+        for s in it:
+            f.write(", ")
+            json.dump(s, f, cls=SolutionEncoder)
+        f.write("]")
+
+
+def load_output(*paths: str) -> List[Solution]:
+    assert len(paths) > 0
+    out: List[Solution] = []
+
+    for path in paths:
+        with _open_output(path, "r") as f:
+            out += json.load(f, object_hook=Solution.from_python_dict)
+
+    return out
 
 
 def filter_solutions(solutions : List[Solution]) -> List[Solution]:
