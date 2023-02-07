@@ -22,6 +22,11 @@ class Solution:
     Np: int  # nombre de projets
     Nj: int  # délai maximal des projets
 
+    nom_mapping: int # crée un mapping entre nom et index
+    travail_mapping: int # crée un mapping entre travail et index
+    qualifications_mapping: int # crée un mapping entre qualifications et index
+    jour_mapping: int # crée un mapping entre jour et index
+
     qualifications: List[str]  # liste de compétences distinctes
     staff: List[str]  # liste des noms des membres
     vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
