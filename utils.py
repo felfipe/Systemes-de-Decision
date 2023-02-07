@@ -191,19 +191,21 @@ class Instance:
 
     def _get_value(self, field_name: str):
         if field_name == "f1":
-            if self.is_multiscene:
-                return self.model.ScenNObjVal
-            else:
-                return self.model.ObjVal
-
-        val = getattr(self, field_name)
-        if isinstance(val, (Var, MVar)):
-            if self.is_multiscene:
-                return val.ScenNX
-            else:
-                return val.X
+            raw = self.model.ScenNObjVal if self.is_multiscene else self.model.ObjVal
         else:
-            return val
+            raw = getattr(self, field_name)
+            if isinstance(raw, (Var, MVar)):
+                raw = raw.ScenNX if self.is_multiscene else raw.X
+
+        if isinstance(raw, float):
+            val = int(round(raw))
+            assert abs(raw - raw) < 1e-5
+        elif isinstance(raw, np.ndarray):
+            val = raw.round().astype(np.int32)
+            assert np.abs(raw - val).max() < 1e-5
+        else:
+            val = raw
+
 
 
 def plot_obj_values(solutions):
