@@ -4,7 +4,8 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 
-from gurobipy import Model, GRB, Var, MVar, LinExpr, MLinExpr
+from gurobipy import Model, GRB, Var, MVar, LinExpr, MLinExpr, quicksum
+import networkx as nx
 
 
 class ModelData:
@@ -182,3 +183,88 @@ def create_planning(data: ModelData):
     df.set_index('membre', drop=True, inplace=True)
     df = df.style.applymap(lambda x: set_color(x, data))
     return df
+
+def create_tables(data: ModelData):
+    df_competences = pd.DataFrame(data.H)
+    df_competences.rename(columns=lambda x: data.qualifications_mapping[int(x)], inplace=True)
+    df_competences['membre'] = data.nom_mapping.values() 
+    df_competences.set_index('membre', drop=True, inplace=True)
+
+    df_projets = pd.DataFrame(data.Q)
+    df_projets.rename(columns=lambda x: data.qualifications_mapping[int(x)], inplace=True)
+    df_projets['projet'] = data.travail_mapping.values() 
+    df_projets.set_index('projet', drop=True, inplace=True)
+
+    return df_competences, df_projets
+
+
+class ModelPreordreData:
+    dim:     int                    # Nombre de dimensions = nombre de criteres
+    epsilon: int                    # Set to relax constraints
+    nombreChoix: int                # Nombre de choix (solutions non dominée)
+    
+    Poids: dict[int, MVar]                     # Poids à attribuer à chaque critere
+    SommePonderee: dict[int, MLinExpr]             # Somme ponderee pour cree un score
+    PreOrdre: dict[int, int]
+
+def get_preorder(choices: list, preference_list: list[tuple]):
+
+    model_data = ModelPreordreData()
+    model_preorder = Model("Preorder")
+
+    model_data.dim = 3
+    model_data.epsilon = 0
+    model_data.nombreChoix = len(choices)
+
+    model_data.Poids = {d : model_preorder.addVar(vtype = GRB.CONTINUOUS, lb=0, ub=0.5, name = f'w{d}') for d in range(1, model_data.dim + 1)}
+
+    model_data.SommePonderee = {l+1 : quicksum([model_data.Poids[i+1]*choices[l][i] for i in range(model_data.dim)]) for l in range(model_data.nombreChoix)}
+
+    model_preorder.addConstr(quicksum(model_data.Poids.values()) == 1., name="Somme des poids = 1")
+    for idx, (a, b) in enumerate(preference_list):
+        model_preorder.addConstr(model_data.SommePonderee[a] >= model_data.SommePonderee[b] + model_data.epsilon, name="C_"+str(idx))
+
+
+    model_preorder.params.outputflag = 0
+    model_preorder.update()
+
+    model_data.PreOrdre = {sol+1 : list() for sol in range(model_data.nombreChoix)}
+
+    for i in range(1, model_data.nombreChoix):
+        for j in range(i+1, model_data.nombreChoix+1):
+            obj1 = model_data.SommePonderee[i] - model_data.SommePonderee[j]
+            model_preorder.setObjective(obj1, GRB.MAXIMIZE)
+            model_preorder.optimize()
+            if model_preorder.objVal < 0:
+                model_data.PreOrdre[j].append(i)
+            else:
+                obj2 = - obj1
+                model_preorder.setObjective(obj2, GRB.MAXIMIZE)
+                model_preorder.optimize()
+                if model_preorder.objVal < 0:
+                    model_data.PreOrdre[i].append(j)
+
+    return model_preorder, model_data
+
+def create_graph(data: ModelPreordreData, draw:bool = False):
+    G = nx.DiGraph()
+
+    for node in range(data.nombreChoix):
+        G.add_node(node+1)
+
+    for node_i in range(data.nombreChoix):
+        for node_j in data.PreOrdre[node_i+1]:
+            G.add_edge(node_i+1, node_j)
+    
+    if draw:
+        pos = nx.circular_layout(G)
+        nx.draw(G, pos,with_labels = True)
+        
+    return G
+
+def dominate(s1, s2):
+    temp = s1 - s2
+    if max(temp) > 0 or min(temp) == 0:
+        return False
+    
+    return True
