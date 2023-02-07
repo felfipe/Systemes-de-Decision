@@ -172,26 +172,36 @@ class Instance:
             kwargs[field.name] = self._get_value(field.name)
         return Solution(**kwargs)
 
-    def get_solutions(self) -> List[Solution]:
+    def iter_solutions(self) -> Generator[Solution, None, None]:
         if not self.is_multiscene:
-            return [self.get_current_solution()]
+            yield self.get_current_solution()
+            return
 
-        solutions = []
         initial_value = self.model.params.ScenarioNumber
         for i in range(self.model.NumScenarios):
+            if np.isinf(self.objective_value):
+                continue
             self.model.params.ScenarioNumber = i
-            solutions.append(self.get_current_solution())
+            yield self.get_current_solution()
         self.model.params.ScenarioNumber = initial_value
 
-        return solutions
+    def get_solutions(self) -> List[Solution]:
+        return list(self.iter_solutions())
 
     @property
     def is_multiscene(self) -> bool:
         return self.model.NumScenarios > 0
 
+    @property
+    def objective_value(self) -> float:
+        if self.is_multiscene:
+            return self.model.ScenNObjVal
+        else:
+            return self.model.ObjVal
+
     def _get_value(self, field_name: str):
         if field_name == "f1":
-            raw = self.model.ScenNObjVal if self.is_multiscene else self.model.ObjVal
+            raw = self.objective_value
         else:
             raw = getattr(self, field_name)
             if isinstance(raw, (Var, MVar)):
@@ -206,6 +216,7 @@ class Instance:
         else:
             val = raw
 
+        return val
 
 
 def plot_obj_values(solutions):
