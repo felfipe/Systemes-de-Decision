@@ -19,6 +19,8 @@ class ModelData:
 
     qualifications: List[str]  # liste de compétences distinctes
     staff: List[str]  # liste des noms des membres
+    vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
+    projects: List[str]  # liste des noms des projets
 
     H: np.ndarray  # attribution des compétences, shape (Nm, Nc)
     C: np.ndarray  # congés, shape (Nm, Nj)
@@ -48,6 +50,8 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
     d = ModelData()
     d.qualifications = list(instance["qualifications"])
     d.staff = [person["name"] for person in instance["staff"]]
+    d.vacations = [person["vacations"] for person in instance["staff"]]
+    d.projects = [job["name"] for job in instance["jobs"]]
 
     # Tailles des données
     d.Nm = len(instance["staff"])
@@ -135,7 +139,6 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
     m.setObjective(d.f1, GRB.MINIMIZE)
 
     return m, d
-
 
 
 def plot_obj_values(solutions):
