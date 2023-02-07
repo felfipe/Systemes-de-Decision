@@ -29,10 +29,11 @@ class ModelData:
     Re: MVar  # rétard par projet, shape (Np,)
     Dm: Var  # durée maximale d'un projet
     Af: MVar  # indique si une personne a travaillé sur un projet, shape (Nm, Np)
+    Mp: Var  # indique le nombre maximum de projets par personne
 
     f1: MLinExpr
-    f2: MLinExpr
-    f3: LinExpr
+    f2: Var
+    f3: Var
 
 
 def create_model(instance_path: str) -> Tuple[Model, ModelData]:
@@ -77,12 +78,13 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
 
     # Variables de decision
     d.T = m.addMVar((d.Nm, d.Np, d.Nc, d.Nj), vtype=GRB.BINARY, name="T")
-    d.R = m.addMVar(d.Np, vtype=GRB.BINARY, name="Realise")
+    d.R = m.addMVar(d.Np, vtype=GRB.BINARY, name="R")
     d.De = m.addMVar(d.Np, lb=1, ub=d.Nj, vtype=GRB.INTEGER, name="De")
     d.F = m.addMVar(d.Np, lb=1, ub=d.Nj, vtype=GRB.INTEGER, name="F")
     d.Re = m.addMVar(d.Np, lb=0, ub=d.Nj-1, vtype=GRB.INTEGER, name="Re")
     d.Dm = m.addVar(lb=0, ub=d.Nj, vtype=GRB.INTEGER, name="Dm")
     d.Af = m.addMVar((d.Nm, d.Np), vtype=GRB.BINARY, name="Af")
+    d.Mp = m.addVar(lb=0, ub=d.Np, vtype=GRB.INTEGER, name="Mp")
 
     # Contrainte de qualification
     for j in range(d.Np):
@@ -104,10 +106,12 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
         for k in range(d.Nc):
             m.addConstr(d.T[:, j, k, :].sum() == d.R[j] * d.Q[j, k])
 
-    # Contraintes sur la variable Af
+    # Contraintes sur les variables d'affectation (Af et Mp)
     for k in range(d.Nc):
         for ell in range(d.Nj):
             m.addConstr(d.Af >= d.T[:, :, k, ell])
+    for i in range(d.Nm):
+        m.addConstr(d.Mp >= d.Af[i, :].sum())
 
     # Contraintes sur la durée d’un projet
     for i in range(d.Nm):
@@ -120,8 +124,8 @@ def create_model(instance_path: str) -> Tuple[Model, ModelData]:
 
     # Fonctions objectifs
     d.f1 = -(d.Rev.T @ d.R - d.P.T @ d.Re)
-    d.f2 = d.Af.sum()
-    d.f3 = d.Dm * 1
+    d.f2 = d.Mp
+    d.f3 = d.Dm
 
     m.setObjective(d.f1, GRB.MINIMIZE)
 
