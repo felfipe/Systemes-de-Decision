@@ -1,5 +1,6 @@
 import json
 from typing import Union, List, TypedDict
+from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.cm as cm
@@ -11,19 +12,20 @@ import pandas as pd
 from gurobipy import Model, GRB, Var, MVar, MLinExpr
 
 
-class Solution(TypedDict):
-    qualifications: List[str]  # liste de compétences distinctes
-    staff: List[str]  # liste des noms des membres
-    vacations: List[List[int]]  # jours des congé par membre (dans le même ordre que staff)
-    projects: List[str]  # liste des noms des projets
+@dataclass
+class Solution:
+    qualifications: np.ndarray  # liste de compétences distinctes
+    staff: np.ndarray  # liste des noms des membres
+    vacations: np.ndarray  # jours des congé par membre (dans le même ordre que staff)
+    projects: np.ndarray  # liste des noms des projets
 
-    T: List[List[List[List[int]]]]  # variable de décision principale, shape (Nm, Np, Nc, Nj)
-    R: List[int]  # indique si un projet est réalisé, shape (Np,)
-    De: List[int]  # jour de début de chaque projet, shape (Np,)
-    F: List[int]  # jour de fin de chaque projet, shape (Np,)
-    Re: List[int]  # rétard par projet, shape (Np,)
+    T: np.ndarray  # variable de décision principale, shape (Nm, Np, Nc, Nj)
+    R: np.ndarray  # indique si un projet est réalisé, shape (Np,)
+    De: np.ndarray  # jour de début de chaque projet, shape (Np,)
+    F: np.ndarray  # jour de fin de chaque projet, shape (Np,)
+    Re: np.ndarray  # rétard par projet, shape (Np,)
     Dm: int  # durée maximale d'un projet
-    Af: List[List[int]]  # indique si une personne a travaillé sur un projet, shape (Nm, Np)
+    Af: np.ndarray  # indique si une personne a travaillé sur un projet, shape (Nm, Np)
     Mp: int  # indique le nombre maximum de projets par personne
 
     f1: int
@@ -158,7 +160,7 @@ class Instance:
 
         self.model.setObjective(self.f1, GRB.MINIMIZE)
 
-    def get_solution(self) -> Solution:
+    def get_current_solution(self) -> Solution:
         return Solution(
             qualifications=self.qualifications,
             staff=self.staff,
@@ -177,14 +179,15 @@ class Instance:
             f3=self._get_value(self.f3),
         )
 
-    def get_all_solutions(self) -> List[Solution]:
-        assert self.is_multiscene
+    def get_solutions(self) -> List[Solution]:
+        if not self.is_multiscene:
+            return [self.get_current_solution()]
 
         solutions = []
         initial_value = self.model.params.ScenarioNumber
         for i in range(self.model.NumScenarios):
             self.model.params.ScenarioNumber = i
-            solutions.append(self.get_solution())
+            solutions.append(self.get_current_solution())
         self.model.params.ScenarioNumber = initial_value
 
         return solutions
@@ -195,9 +198,9 @@ class Instance:
 
     def _get_value(self, var: Union[Var, MVar]):
         if self.is_multiscene:
-            value = var.ScenNX
+            return var.ScenNX
         else:
-            value = var.X
+            return var.X
         
         if isinstance(value, np.ndarray):
             return value.tolist()
