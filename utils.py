@@ -11,7 +11,7 @@ import numpy as np
 import plotly.express as px
 import pandas as pd
 
-from gurobipy import Model, GRB, Var, MVar, MLinExpr
+from gurobipy import Model, GRB, Var, MVar, MLinExpr, GurobiError
 
 
 @dataclass
@@ -38,6 +38,8 @@ class Solution:
     f1: int
     f2: int
     f3: int
+
+    gap: float
 
     @staticmethod
     def from_python_dict(d: dict) -> "Solution":
@@ -162,7 +164,7 @@ class Instance:
         # Contraintes d’unicité de la réalisation d’un projet et de couverture des qualifications
         for j in range(self.Np):
             for k in range(self.Nc):
-                self.model.addConstr(self.T[:, j, k, :].sum() == self.R[j] * self.Q[j, k])
+                self.model.addConstr(self.T[:, j, k, :].sum() >= self.R[j] * self.Q[j, k])
 
         # Contraintes sur les variables d'affectation (Af et Mp)
         for k in range(self.Nc):
@@ -200,10 +202,15 @@ class Instance:
 
         initial_value = self.model.params.ScenarioNumber
         for i in range(self.model.NumScenarios):
-            if np.isinf(self.objective_value):
-                continue
             self.model.params.ScenarioNumber = i
-            yield self.get_current_solution()
+            try:
+                if np.isinf(self.objective_value):
+                    print(f'Scenario {i} is infeasible or no feasible solution found')
+                else:
+                    yield self.get_current_solution()
+                    print(f'Got scenario {i}')
+            except GurobiError as e:
+                print(f'Error getting solution for scenario {i}: {e}')
         self.model.params.ScenarioNumber = initial_value
 
     def get_solutions(self) -> List[Solution]:
@@ -220,6 +227,19 @@ class Instance:
         else:
             return self.model.ObjVal
 
+    @property
+    def gap(self) -> float:
+        if self.is_multiscene:
+            bound = self.model.ScenNObjBound
+        else:
+            bound = self.model.ObjBound
+
+        obj = self.objective_value
+        if obj == 0:
+            return 0 if abs(bound - obj) < 1e-5 else np.inf
+
+        return abs((obj - bound) / obj)
+
     def _get_value(self, field_name: str):
         if field_name == "f1":
             raw = self.objective_value
@@ -228,7 +248,7 @@ class Instance:
             if isinstance(raw, (Var, MVar)):
                 raw = raw.ScenNX if self.is_multiscene else raw.X
 
-        if isinstance(raw, float):
+        if isinstance(raw, float) and field_name != "gap":
             val = int(round(raw))
             assert abs(raw - raw) < 1e-5
         elif isinstance(raw, np.ndarray):
