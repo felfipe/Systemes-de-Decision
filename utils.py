@@ -319,10 +319,10 @@ def plot_solution(solution : Solution):
 
     final_xmargin = solution.Nj / 3
     ax.set_ylim(-0.5, solution.Nm+ymargin)
-    ax.set_xlim(-0.5, solution.Nj+final_xmargin)
+    ax.set_xlim(0.5, solution.Nj+final_xmargin)
 
     norm = matplotlib.colors.Normalize(vmin=0, vmax=solution.Np+1, clip=True)
-    mapper = cm.ScalarMappable(norm=norm, cmap=cm.Set1)
+    mapper = cm.ScalarMappable(norm=norm, cmap='tab20')
 
     patches = [mpatches.Patch(color=mapper.to_rgba(i), label=proj) for i, proj in enumerate(solution.projects)]
     ax.legend(handles=patches)
@@ -335,6 +335,7 @@ def plot_solution(solution : Solution):
         for p in range(solution.Np):
             for c in range(solution.Nc):   
                 for jour, worked in enumerate(solution.T[i][p][c]):
+                    jour+=0.5 # center
                     if(worked == 1):
                         p_staff_list.append((jour, 1-xmargin))
                         projects.append(p)
@@ -346,7 +347,7 @@ def plot_solution(solution : Solution):
         # plot vacations
         for p in range(solution.Nm):
             for j in solution.vacations[p]:
-                ax.annotate("Congé", (j-1 + 0.4, p+0.5))
+                ax.annotate("Va", (j, p+0.5))
 
             
     plt.show()
