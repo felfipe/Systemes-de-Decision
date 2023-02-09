@@ -263,26 +263,29 @@ class Instance:
 
     def _get_value(self, field_name: str):
         if field_name == "f1":
-            raw = self.objective_value
+            val = self.objective_value
         else:
-            raw = getattr(self, field_name)
-            if isinstance(raw, Var):
-                raw = self._get_var(raw)
-            elif isinstance(raw, tupledict):
-                shape = np.asarray(raw.keys()).max(axis=0) + 1
+            val = getattr(self, field_name)
+            if isinstance(val, Var):
+                val = self._get_var(val)
+            elif isinstance(val, tupledict):
+                shape = np.asarray(val.keys()).max(axis=0) + 1
                 try:
                     shape = tuple(shape)
                 except TypeError:
-                    raw = [self._get_var(raw[idx]) for idx in range(shape)]
+                    val = [self._get_var(val[idx]) for idx in range(shape)]
                 else:
-                    raw = [self._get_var(raw[idx]) for idx in np.ndindex(shape)]
+                    val = [self._get_var(val[idx]) for idx in np.ndindex(shape)]
                 
-                raw = np.reshape(raw, shape).round().astype(np.int32)
-                assert np.abs(val - raw).max() < 1e-5
+                val = np.reshape(val, shape)
+                old = val
+                val = val.round().astype(np.int32)
+                assert np.abs(val - old).max() < 1e-5
 
-        if isinstance(raw, float) and field_name != "gap":
-            val = int(round(raw))
-            assert abs(val - raw) < 1e-5
+        if isinstance(val, float) and field_name != "gap":
+            old = val
+            val = int(round(val))
+            assert abs(val - old) < 1e-5
 
         return val
 
@@ -358,7 +361,7 @@ def plot_obj_values(solutions):
 
 def plot_solution(solution : Solution):
     fig, ax = plt.subplots()
-    fig.set_size_inches(16, 9)
+    fig.set_size_inches(16, 6)
     ax.set_yticks([i+0.5 for i in range(len(solution.staff))], labels=solution.staff)
     # Horizontal bar plot with gaps
     ymargin = 0.1
@@ -384,7 +387,7 @@ def plot_solution(solution : Solution):
         for p in range(solution.Np):
             for c in range(solution.Nc):   
                 for ell in range(solution.Nj):
-                    worked = solution.T[i, p, c, ell].X
+                    worked = solution.T[i, p, c, ell]
                     ell+=0.5 # center
                     if(worked == 1):
                         p_staff_list.append((ell, 1))
@@ -399,8 +402,8 @@ def plot_solution(solution : Solution):
         for j in solution.vacations[p]:
             ax.annotate("Vacation", (j, p+0.5+ymargin/2), ha='center', va='center', rotation=90)
     
-    for jour in range(solution.Nj+1):
-        ax.axvline(jour+0.5, c='gray', lw=0.5)
+    for ell in range(solution.Nj+1):
+        ax.axvline(ell+0.5, c='gray', lw=0.5)
 
             
     plt.show()
