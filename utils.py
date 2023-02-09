@@ -348,33 +348,69 @@ def filter_solutions(solutions : List[Solution]) -> List[Solution]:
 
     return filtered_solutions
 
-def plot_obj_values(solutions):
-    obj_f1 = [s.f1 for s in solutions]
-    obj_f2 = [s.f2 for s in solutions]
-    obj_f3 = [s.f3 for s in solutions]
+def plot_objective_surface(solutions, solutions_nd, level_curves=False):
+    Np = solutions[0].Np
+    Nj = solutions[0].Nj
+
+    f2_min = min(s.f2 for s in solutions)
+    f2_max = max(s.f2 for s in solutions)
+    f3_min = min(s.f3 for s in solutions)
+    f3_max = max(s.f3 for s in solutions)
+
+    f1_nd = [s.f1 for s in solutions_nd]
+    f2_nd = [s.f2 for s in solutions_nd]
+    f3_nd = [s.f3 for s in solutions_nd]
+
+    plt.scatter(f2_nd, f3_nd, c='r', zorder=100)
+
+    F1 = np.full((Nj+1, Np+1), np.nan)
+    for s in solutions:
+        F1[s.f3, s.f2] = s.f1
+
+    ax=plt.gca()
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+    extent = (f2_min, f2_max, f3_min, f3_max)
+    if level_curves:
+        levels = sorted({s.f1 for s in solutions_nd if not np.isinf(s.f1)})
+        manual = [(1.4, 0.8), (1.3, 1.5), (1.6, 1.5), (1.6, 1.9), (1.8, 1.9), (2.4, 1.8), (2.2, 2.2), (2.4, 2.6)]
+        kwargs = dict(manual=manual) if len(manual) == len(levels) else {}
+        cs = plt.contour(F1, extent=extent, levels=levels, zorder=99, colors='r')
+        plt.clabel(cs, **kwargs)
+    plt.imshow(F1[::-1], extent=extent, interpolation='bilinear', cmap='Purples_r')
+    plt.colorbar()
 
 
-    
-    fig = px.scatter_3d(x=obj_f1, y=obj_f2, z=obj_f3)
-    fig.show()
-
-
-def plot_solution(solution : Solution):
+def plot_solution(solution : Solution, font_size: float=14):
     fig, ax = plt.subplots()
-    fig.set_size_inches(16, 6)
+    fig.set_size_inches(1 + 0.5 * solution.Nj, 1 + solution.Nm)
     ax.set_yticks([i+0.5 for i in range(len(solution.staff))], labels=solution.staff)
     # Horizontal bar plot with gaps
     ymargin = 0.1
     height = solution.Nm - ymargin
-    width = solution.Nj    
+    width = solution.Nj
     xmargin = ymargin / height * width
 
     ax.set_ylim(0, solution.Nm+ymargin)
     ax.set_xlim(0.5-xmargin, solution.Nj+0.5+xmargin)
     ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins='auto'))
 
-    norm = matplotlib.colors.Normalize(vmin=0, vmax=solution.Np+1, clip=True)
-    mapper = cm.ScalarMappable(norm=norm, cmap='tab20')
+    tab20c = plt.get_cmap('tab20c').colors
+    tab20b = plt.get_cmap('tab20b').colors
+    colors = tab20c + tab20b[:4] + tab20b[12:]
+    if solution.Np <= len(colors) // 4:
+        colors = colors[::4]
+    elif solution.Np <= len(colors) // 2:
+        colors = colors[::2]
+
+    if solution.Np <= len(colors):
+        vmax = len(colors) - 1
+    else:
+        vmax = solution.Np - 1
+        print('Warning: not enough colors to distringuish all projects')
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=vmax, clip=True)
+    mapper = cm.ScalarMappable(norm=norm, cmap=matplotlib.colors.ListedColormap(colors))
 
     patches = [mpatches.Patch(color=mapper.to_rgba(i), label=proj) for i, proj in enumerate(solution.projects)]
     ax.legend(handles=patches, loc='upper left', bbox_to_anchor=(1, 1))
@@ -392,7 +428,7 @@ def plot_solution(solution : Solution):
                     if(worked == 1):
                         p_staff_list.append((ell, 1))
                         projects.append(p)
-                        ax.annotate(solution.qualifications[c], (ell +0.5, i+0.5+ymargin/2), ha='center', va='center')
+                        ax.annotate(solution.qualifications[c], (ell +0.5, i+0.5+ymargin/2), ha='center', va='center', size=font_size)
 
         ax.broken_barh(p_staff_list, (i + ymargin, 1 - ymargin), facecolors=mapper.to_rgba(projects))
         ax.set_xlabel('Day')              
@@ -400,7 +436,7 @@ def plot_solution(solution : Solution):
     # plot vacations
     for p in range(solution.Nm):
         for j in solution.vacations[p]:
-            ax.annotate("Vacation", (j, p+0.5+ymargin/2), ha='center', va='center', rotation=90)
+            ax.annotate("Vacation", (j, p+0.5+ymargin/2), ha='center', va='center', rotation=90, size=font_size*0.7)
     
     for ell in range(solution.Nj+1):
         ax.axvline(ell+0.5, c='gray', lw=0.5)
