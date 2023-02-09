@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import plotly.express as px
 import pandas as pd
@@ -335,17 +336,19 @@ def plot_solution(solution : Solution):
     ax.set_yticks([i+0.5 for i in range(len(solution.staff))], labels=solution.staff)
     # Horizontal bar plot with gaps
     ymargin = 0.1
-    xmargin = 0.01
+    height = solution.Nm - ymargin
+    width = solution.Nj    
+    xmargin = ymargin / height * width
 
-    final_xmargin = solution.Nj / 3
-    ax.set_ylim(-0.5, solution.Nm+ymargin)
-    ax.set_xlim(0.5, solution.Nj+final_xmargin)
+    ax.set_ylim(0, solution.Nm+ymargin)
+    ax.set_xlim(0.5-xmargin, solution.Nj+0.5+xmargin)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins='auto'))
 
     norm = matplotlib.colors.Normalize(vmin=0, vmax=solution.Np+1, clip=True)
     mapper = cm.ScalarMappable(norm=norm, cmap='tab20')
 
     patches = [mpatches.Patch(color=mapper.to_rgba(i), label=proj) for i, proj in enumerate(solution.projects)]
-    ax.legend(handles=patches)
+    ax.legend(handles=patches, loc='upper left', bbox_to_anchor=(1, 1))
 
     for i in range(solution.Nm):
         p_staff_list = []
@@ -357,17 +360,20 @@ def plot_solution(solution : Solution):
                 for jour, worked in enumerate(solution.T[i][p][c]):
                     jour+=0.5 # center
                     if(worked == 1):
-                        p_staff_list.append((jour, 1-xmargin))
+                        p_staff_list.append((jour, 1))
                         projects.append(p)
-                        ax.annotate(solution.qualifications[c], (jour +0.5, i+0.5))
+                        ax.annotate(solution.qualifications[c], (jour +0.5, i+0.5+ymargin/2), ha='center', va='center')
 
         ax.broken_barh(p_staff_list, (i + ymargin, 1 - ymargin), facecolors=mapper.to_rgba(projects))
-        ax.set_xlabel('Days')              
+        ax.set_xlabel('Day')              
         
-        # plot vacations
-        for p in range(solution.Nm):
-            for j in solution.vacations[p]:
-                ax.annotate("Va", (j, p+0.5))
+    # plot vacations
+    for p in range(solution.Nm):
+        for j in solution.vacations[p]:
+            ax.annotate("Vacation", (j, p+0.5+ymargin/2), ha='center', va='center', rotation=90)
+    
+    for jour in range(solution.Nj+1):
+        ax.axvline(jour+0.5, c='gray', lw=0.5)
 
             
     plt.show()
