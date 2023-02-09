@@ -12,7 +12,7 @@ import numpy as np
 import plotly.express as px
 import pandas as pd
 
-from gurobipy import Model, GRB, Var, MVar, MLinExpr, GurobiError
+from gurobipy import Model, GRB, Var, LinExpr, quicksum, tupledict, GurobiError
 
 
 @dataclass
@@ -83,16 +83,16 @@ class Instance:
     P: np.ndarray  # pénalité des projets, shape (Np,)
     Dl: np.ndarray  # deadline des projets, shape (Np,)
 
-    T: MVar  # variable de décision principale, shape (Nm, Np, Nc, Nj)
-    R: MVar  # indique si un projet est réalisé, shape (Np,)
-    De: MVar  # jour de début de chaque projet, shape (Np,)
-    F: MVar  # jour de fin de chaque projet, shape (Np,)
-    Re: MVar  # rétard par projet, shape (Np,)
+    T: tupledict  # variable de décision principale, shape (Nm, Np, Nc, Nj)
+    R: tupledict  # indique si un projet est réalisé, shape (Np,)
+    De: tupledict  # jour de début de chaque projet, shape (Np,)
+    F: tupledict  # jour de fin de chaque projet, shape (Np,)
+    Re: tupledict  # rétard par projet, shape (Np,)
     Dm: Var  # durée maximale d'un projet
-    Af: MVar  # indique si une personne a travaillé sur un projet, shape (Nm, Np)
+    Af: tupledict  # indique si une personne a travaillé sur un projet, shape (Nm, Np)
     Mp: Var  # indique le nombre maximum de projets par personne
 
-    f1: MLinExpr
+    f1: LinExpr
     f2: Var
     f3: Var
 
@@ -138,53 +138,70 @@ class Instance:
         self.model = Model("CompuOpti")
 
         # Variables de decision
-        self.T = self.model.addMVar((self.Nm, self.Np, self.Nc, self.Nj), vtype=GRB.BINARY, name="T")
-        self.R = self.model.addMVar(self.Np, vtype=GRB.BINARY, name="R")
-        self.De = self.model.addMVar(self.Np, lb=1, ub=self.Nj, vtype=GRB.INTEGER, name="De")
-        self.F = self.model.addMVar(self.Np, lb=1, ub=self.Nj, vtype=GRB.INTEGER, name="F")
-        self.Re = self.model.addMVar(self.Np, lb=0, ub=self.Nj-1, vtype=GRB.INTEGER, name="Re")
-        self.Dm = self.model.addVar(lb=0, ub=self.Nj, vtype=GRB.INTEGER, name="Dm")
-        self.Af = self.model.addMVar((self.Nm, self.Np), vtype=GRB.BINARY, name="Af")
-        self.Mp = self.model.addVar(lb=0, ub=self.Np, vtype=GRB.INTEGER, name="Mp")
+        self.T = self.model.addVars(self.Nm, self.Np, self.Nc, self.Nj, vtype=GRB.BINARY)
+        self.R = self.model.addVars(self.Np, vtype=GRB.BINARY, name="R")
+        self.De = self.model.addVars(self.Np, lb=0, vtype=GRB.INTEGER, name="De")
+        self.F = self.model.addVars(self.Np, lb=0, vtype=GRB.INTEGER, name="F")
+        self.Re = self.model.addVars(self.Np, lb=0, vtype=GRB.INTEGER, name="Re")
+        self.Dm = self.model.addVar(lb=0, vtype=GRB.INTEGER, name="Dm")
+        self.Af = self.model.addVars(self.Nm, self.Np, vtype=GRB.BINARY, name="Af")
+        self.Mp = self.model.addVar(lb=0, vtype=GRB.INTEGER, name="Mp")
+        self.W = self.model.addVars(self.Np, self.Nj, vtype=GRB.BINARY, name="W")
 
-        # Contrainte de qualification
-        for j in range(self.Np):
-            for ell in range(self.Nj):
-                self.model.addConstr(self.T[:, j, :, ell] <= self.H)
 
-        # Contrainte d’unicité de l’affectation
+        for i in range(self.Nm):
+            for j in range(self.Np):
+                for k in range(self.Nc):
+                    for ell in range(self.Nj):
+
+                        # qualification
+                        self.model.addConstr(self.T[i, j, k, ell] <= self.H[i, k])
+
+                        # contrainte de congé
+                        self.model.addConstr(self.T[i, j, k, ell] <= 1 - self.C[i, ell])
+
+                        # contraint affecté
+                        self.model.addConstr(self.Af[i, j] >= self.T[i, j, k, ell])
+
+                        # projet a travaillé
+                        self.model.addConstr(self.T[i, j, k, ell] <= self.W[j, ell])
+
+        # Unicité affectation
         for i in range(self.Nm):
             for ell in range(self.Nj):
-                self.model.addConstr(self.T[i, :, :, ell].sum() <= 1)
-
-        # Contrainte de congé
-        for j in range(self.Np):
-            for k in range(self.Nc):
-                self.model.addConstr(self.T[:, j, k, :] <= 1 - self.C)
+                
+                sum_affect = np.array([ self.T[i, project, k, ell] for k in range(self.Nc) for project in range(self.Np) ])
+                sum_affect = sum_affect.flatten()
+                self.model.addConstr(quicksum(sum_affect) <= 1)
 
         # Contraintes d’unicité de la réalisation d’un projet et de couverture des qualifications
         for j in range(self.Np):
             for k in range(self.Nc):
-                self.model.addConstr(self.T[:, j, k, :].sum() >= self.R[j] * self.Q[j, k])
+                realisation_projet = np.array( [self.T[i, j, k, ell] for i in range(self.Nm) for ell in range(self.Nj)] )
+                realisation_projet = realisation_projet.flatten()
+                
+                self.model.addConstr(quicksum(realisation_projet) >= self.Q[j, k] -  self.Nc* (1 - self.R[j]))
 
-        # Contraintes sur les variables d'affectation (Af et Mp)
-        for k in range(self.Nc):
-            for ell in range(self.Nj):
-                self.model.addConstr(self.Af >= self.T[:, :, k, ell])
+
+        # Mp contraint
         for i in range(self.Nm):
-            self.model.addConstr(self.Mp >= self.Af[i, :].sum())
+            aff_projets = np.array( [self.Af[i, j] for j in range(self.Np)] ).flatten()
+            self.model.addConstr(self.Mp >= quicksum(aff_projets))
 
         # Contraintes sur la durée d’un projet
-        for i in range(self.Nm):
-            for k in range(self.Nc):
-                for ell in range(self.Nj):
-                    self.model.addConstr(self.De <= (ell + 1) * self.T[i, :, k, ell] + self.Nj * (1 - self.T[i, :, k, ell]))
-                    self.model.addConstr(self.F >= (ell + 1) * self.T[i, :, k, ell])
-        self.model.addConstr(self.Re >= self.F - self.Dl)
-        self.model.addConstr(self.Dm >= self.F - self.De + self.R)
+        for j in range(self.Np):
+            for ell in range(self.Nj):
+                self.model.addConstr( ell + 1 - self.De[j] >= self.Nj * (self.W[j, ell] - 1) )
+                self.model.addConstr(self.F[j] - (ell + 1) >= self.Nj * (self.W[j, ell] - 1))
+
+        for j in range(self.Np):
+            self.model.addConstr(self.Re[j] >= self.F[j] - self.Dl[j])
+            self.model.addConstr(self.Dm >= self.F[j] - self.De[j] + 1)
 
         # Fonctions objectifs
-        self.f1 = -(self.Rev.T @ self.R - self.P.T @ self.Re)
+        sum_revenu = [-self.Rev[j]*self.R[j] + self.P[j]*self.Re[j] for j in range(self.Np)]
+        sum_revenu = np.array(sum_revenu).flatten()
+        self.f1 = (quicksum(sum_revenu))
         self.f2 = self.Mp
         self.f3 = self.Dm
 
@@ -227,6 +244,9 @@ class Instance:
             return self.model.ScenNObjVal
         else:
             return self.model.ObjVal
+    
+    def _get_var(self, var: Var) -> float:
+        return var.ScenNX if self.is_multiscene else var.X
 
     @property
     def gap(self) -> float:
@@ -246,17 +266,23 @@ class Instance:
             raw = self.objective_value
         else:
             raw = getattr(self, field_name)
-            if isinstance(raw, (Var, MVar)):
-                raw = raw.ScenNX if self.is_multiscene else raw.X
+            if isinstance(raw, Var):
+                raw = self._get_var(raw)
+            elif isinstance(raw, tupledict):
+                shape = np.asarray(raw.keys()).max(axis=0) + 1
+                try:
+                    shape = tuple(shape)
+                except TypeError:
+                    raw = [self._get_var(raw[idx]) for idx in range(shape)]
+                else:
+                    raw = [self._get_var(raw[idx]) for idx in np.ndindex(shape)]
+                
+                raw = np.reshape(raw, shape).round().astype(np.int32)
+                assert np.abs(val - raw).max() < 1e-5
 
         if isinstance(raw, float) and field_name != "gap":
             val = int(round(raw))
-            assert abs(raw - raw) < 1e-5
-        elif isinstance(raw, np.ndarray):
-            val = raw.round().astype(np.int32)
-            assert np.abs(raw - val).max() < 1e-5
-        else:
-            val = raw
+            assert abs(val - raw) < 1e-5
 
         return val
 
@@ -357,12 +383,13 @@ def plot_solution(solution : Solution):
         # plot planning
         for p in range(solution.Np):
             for c in range(solution.Nc):   
-                for jour, worked in enumerate(solution.T[i][p][c]):
-                    jour+=0.5 # center
+                for ell in range(solution.Nj):
+                    worked = solution.T[i, p, c, ell].X
+                    ell+=0.5 # center
                     if(worked == 1):
-                        p_staff_list.append((jour, 1))
+                        p_staff_list.append((ell, 1))
                         projects.append(p)
-                        ax.annotate(solution.qualifications[c], (jour +0.5, i+0.5+ymargin/2), ha='center', va='center')
+                        ax.annotate(solution.qualifications[c], (ell +0.5, i+0.5+ymargin/2), ha='center', va='center')
 
         ax.broken_barh(p_staff_list, (i + ymargin, 1 - ymargin), facecolors=mapper.to_rgba(projects))
         ax.set_xlabel('Day')              
