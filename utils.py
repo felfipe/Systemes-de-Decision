@@ -379,7 +379,9 @@ def plot_objective_surface(solutions, solutions_nd, level_curves=False):
         cs = plt.contour(F1, extent=extent, levels=levels, zorder=99, colors='r')
         plt.clabel(cs, **kwargs)
     plt.imshow(F1[::-1], extent=extent, interpolation='bilinear', cmap='Purples_r')
-    plt.colorbar()
+    plt.xlabel('$f_2$')
+    plt.ylabel('$f_3$')
+    plt.colorbar(label='$f_1$')
 
 
 def plot_solution(solution : Solution, font_size: float=14):
